@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+/* Dark theme (default) */
+.theme-dark {
+  --bg: #0b0e14;
+  --surface: #12161f;
+  --surface2: #191e29;
+  --border: #262c3a;
+  --text: #e6e9ef;
+  --muted: #8b93a7;
+  --accent: #5b8cff;
+  --success: #3ec18c;
+  --warning: #e0a13b;
+  --danger: #e55a5a;
+}
+
+/* Light theme */
+.theme-light {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface2: #f0f1f6;
+  --border: #e1e4ea;
+  --text: #14171f;
+  --muted: #626a7d;
+  --accent: #3763e8;
+  --success: #1f9d6e;
+  --warning: #b5790f;
+  --danger: #c73f3f;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+* {
+  border-color: var(--border);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 8px;
+}

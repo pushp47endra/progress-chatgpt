@@ -1,0 +1,342 @@
+// ============================================================
+// GATE AI - Prisma schema
+// Next.js -> Prisma -> Neon PostgreSQL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------
+// Auth
+// ------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions        Session[]
+  conversations   Conversation[]
+  subjects        Subject[]
+  topics          Topic[]
+  studyTasks      StudyTask[]
+  studySessions   StudySession[]
+  questions       Question[]
+  questionAttempts QuestionAttempt[]
+  mistakes        Mistake[]
+  notes           Note[]
+  dailyProgress   DailyProgress[]
+  settings        UserSettings?
+  mcpApiTokens    McpApiToken[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ------------------------------------------------------------
+// MCP (ChatGPT) API access
+// ------------------------------------------------------------
+
+// A hashed, revocable bearer credential used by remote MCP clients (e.g.
+// ChatGPT's MCP connector) to authenticate as a specific tracker user.
+// The raw token is shown to the user exactly once at creation time (see
+// scripts/mcp-token.ts) and only its SHA-256 hash is ever persisted, the
+// same principle already used for User.passwordHash/Session.token.
+model McpApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  // Simple fixed-window rate limit counter (per token). Vercel serverless
+  // functions have no shared in-memory state between invocations, so this
+  // counter is persisted in Postgres rather than kept in a module variable.
+  rateLimitWindowStart DateTime?
+  rateLimitCount       Int       @default(0)
+
+  @@index([userId])
+}
+
+// ------------------------------------------------------------
+// AI Chat
+// ------------------------------------------------------------
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @default("New Chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+
+  @@index([userId, updatedAt])
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String       @db.Text
+  model          String?
+  promptTokens   Int?
+  completionTokens Int?
+  optimizedPrompt String?     @db.Text
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+// ------------------------------------------------------------
+// Subjects / Topics
+// ------------------------------------------------------------
+
+model Subject {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+
+  topics     Topic[]
+  studyTasks StudyTask[]
+  questions  Question[]
+  mistakes   Mistake[]
+  notes      Note[]
+
+  @@unique([userId, name])
+}
+
+enum Priority {
+  low
+  medium
+  high
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+}
+
+model Topic {
+  id             String     @id @default(cuid())
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId      String
+  subject        Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  name           String
+  completed      Boolean    @default(false)
+  priority       Priority   @default(medium)
+  estimatedTime  Int?       // minutes
+  questionTarget Int?
+  notes          String?    @db.Text
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  studyTasks StudyTask[]
+  questions  Question[]
+  mistakes   Mistake[]
+  notesRel   Note[]
+
+  @@index([subjectId])
+}
+
+// ------------------------------------------------------------
+// Date-wise Study Tracker
+// ------------------------------------------------------------
+
+model StudyTask {
+  id             String     @id @default(cuid())
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date           DateTime   @db.Date
+  subjectId      String?
+  subject        Subject?   @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId        String?
+  topic          Topic?     @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  subtopic       String?
+  estimatedTime  Int?       // minutes
+  priority       Priority   @default(medium)
+  difficulty     Difficulty @default(medium)
+  questionTarget Int?
+  notes          String?    @db.Text
+  completed      Boolean    @default(false)
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([userId, date])
+}
+
+model StudySession {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String?
+  topicName String?
+  startTime DateTime
+  endTime   DateTime?
+  duration  Int?      // seconds
+  createdAt DateTime  @default(now())
+
+  @@index([userId, startTime])
+}
+
+model DailyProgress {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime @db.Date
+  tasksTotal   Int      @default(0)
+  tasksDone    Int      @default(0)
+  studySeconds Int      @default(0)
+  isActiveDay  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+// ------------------------------------------------------------
+// Questions / Mistakes / Notes
+// ------------------------------------------------------------
+
+enum QuestionStatus {
+  not_attempted
+  attempted
+  correct
+  incorrect
+  skipped
+}
+
+model Question {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId     String?
+  subject       Subject?       @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId       String?
+  topic         Topic?         @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  questionText  String         @db.Text
+  difficulty    Difficulty     @default(medium)
+  source        String?
+  userAnswer    String?        @db.Text
+  correctAnswer String?        @db.Text
+  explanation   String?        @db.Text
+  status        QuestionStatus @default(not_attempted)
+  date          DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  attempts QuestionAttempt[]
+
+  @@index([userId, status])
+}
+
+model QuestionAttempt {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  isCorrect  Boolean
+  answer     String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([questionId])
+}
+
+enum RevisionStatus {
+  not_revised
+  revised
+  mastered
+}
+
+model Mistake {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId       String?
+  subject         Subject?       @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId         String?
+  topic           Topic?         @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  question        String         @db.Text
+  myAnswer        String?        @db.Text
+  correctAnswer   String?        @db.Text
+  whyWrong        String?        @db.Text
+  correctConcept  String?        @db.Text
+  revisionStatus  RevisionStatus @default(not_revised)
+  date            DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([userId, revisionStatus])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  topicId   String?
+  topic     Topic?   @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  title     String
+  content   String   @db.Text
+  tags      String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ------------------------------------------------------------
+// Settings
+// ------------------------------------------------------------
+
+model UserSettings {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetDate           DateTime @db.Date @default(dbgenerated("'2027-02-07'::date"))
+  dailyTargetMinutes   Int      @default(120)
+  preferredLanguage    String   @default("hinglish")
+  preferredDifficulty  Difficulty @default(medium)
+  theme                String   @default("dark")
+  debugMode            Boolean  @default(false)
+  timezone             String   @default("Asia/Kolkata")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
